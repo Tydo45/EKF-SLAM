@@ -37,13 +37,17 @@ def cov_ellipse_params(cov, n_std=2.0):
 # --- Visualizer class -------------------------------------------------------
 
 class Visualizer:
-    def __init__(self, landmarks=None, robot_pose=None, robot_cov=None):
-        # landmarks: list of (id, x, y)
-        self.landmarks = landmarks or []
-        # robot_pose: (x, y, theta)
-        self.pose = robot_pose or (0.0, 0.0, 0.0)
-        # robot covariance 2x2 (x,y)
-        self.cov = robot_cov if robot_cov is not None else np.array([[0.2, 0.0], [0.0, 0.2]])
+    def __init__(self, DataLoader):
+        # reader for JSONL data
+        self.data_loader = DataLoader
+        # read initial frame
+        try:
+            self.landmarks, self.pose, self.cov = self.data_loader.read_next()
+        except StopIteration:
+            self.landmarks = []
+            self.pose = (0.0, 0.0, 0.0)
+            self.cov = np.array([[0.2, 0.0], [0.0, 0.2]])
+
         # matplotlib setup
         self.fig, self.ax = plt.subplots(figsize=(7, 7))
         self.ax.set_aspect('equal', 'box')
@@ -87,8 +91,6 @@ class Visualizer:
                 txt = self.ax.text(x, y, f'{_id}', color='k', fontsize=9,
                                    verticalalignment='bottom', horizontalalignment='right')
                 self.landmark_texts.append(txt)
-        else:
-            self.landmark_sc.set_offsets([])
 
     def _draw_robot(self):
         x, y, theta = self.pose
@@ -117,25 +119,14 @@ class Visualizer:
         self._draw_robot()
         self.fig.canvas.draw_idle()
 
-    # --- simple simulation step (replaceable by EKF update calls) ------------
-    def step_simulation(self, v=0.5, w=0.1, dt=0.5):
-        """Move robot forward with differential motion and grow cov slightly."""
-        x, y, theta = self.pose
-        # simple bicycle/differential motion integration
-        x += v * math.cos(theta) * dt
-        y += v * math.sin(theta) * dt
-        theta += w * dt
-        theta = (theta + math.pi) % (2 * math.pi) - math.pi
-        self.pose = (x, y, theta)
-        # grow covariance as a simple model
-        Q = np.array([[0.02 * abs(v) + 0.001, 0.0], [0.0, 0.02 * abs(v) + 0.001]])
-        self.cov = self.cov + Q
-        # optionally add a landmark occasionally
-        if np.random.rand() < 0.05:
-            new_id = (max([_id for (_id, _, _) in self.landmarks], default=0) + 1)
-            lx = x + np.random.randn() * 2 + 5 * math.cos(theta + np.random.randn())
-            ly = y + np.random.randn() * 2 + 5 * math.sin(theta + np.random.randn())
-            self.landmarks.append((new_id, lx, ly))
+    # --- read next frame from JSONL ------------
+    def step_simulation(self):
+        """Read next frame from JSONL data loader and update pose, landmarks, cov."""
+        try:
+            self.landmarks, self.pose, self.cov = self.data_loader.read_next()
+        except StopIteration:
+            print("End of data reached.")
+            self.running = False
 
     # --- event handling -------------------------------------------------------
     def _on_key(self, event):
@@ -314,136 +305,6 @@ class DataLoader:
         """Reset internal position so next read_next() returns frame 0."""
         self.current_index = -1
 
-# def load_from_json(path, frame=None):
-#     """Load data from a JSON or JSONL file and return (landmarks, pose, cov).
-
-#     Supported input shapes (robust):
-#         - JSONL: multiple JSON objects, each with keys 'robot_position' and 'map'.
-#             By default the first non-empty line is used as the initial state (can be
-#             overridden with the --frame CLI option).
-#     - JSON: a single JSON object with keys 'robot_position' (or 'pose') and
-#       'map' or 'landmarks'.
-
-#     Returns:
-#       landmarks: list of (id, x, y)
-#       pose: (x, y, theta)
-#       cov: 2x2 numpy array (default if not present in file)
-#     """
-#     # read whole file first; support JSONL by picking the last non-empty line
-#     with open(path, 'r', encoding='utf-8') as f:
-#         text = f.read()
-
-#     text = text.strip()
-#     if not text:
-#         raise ValueError(f"Empty file: {path}")
-
-#     data = None
-#     # detect JSONL (multiple lines / multiple top-level JSON objects)
-#     if '\n' in text:
-#         # collect non-empty JSON lines
-#         lines = [ln for ln in text.splitlines() if ln.strip()]
-#         if not lines:
-#             raise ValueError(f"No JSON objects found in {path}")
-
-#         # decide which frame to use
-#         chosen = None
-#         # default behaviour: treat None as 'first'
-#         if frame is None or str(frame).lower() == 'first':
-#             chosen = lines[0]
-#         elif str(frame).lower() == 'last':
-#             chosen = lines[-1]
-#         else:
-#             # try integer index (0-based)
-#             try:
-#                 idx = int(frame)
-#             except Exception:
-#                 raise ValueError("--frame must be 'first', 'last' or an integer index (0-based)")
-#             if idx < 0 or idx >= len(lines):
-#                 raise IndexError(f"Frame index {idx} out of range (0..{len(lines)-1})")
-#             chosen = lines[idx]
-
-#         try:
-#             data = json.loads(chosen)
-#         except Exception:
-#             # fallback: try to parse entire file as JSON array/object
-#             try:
-#                 data = json.loads(text)
-#             except Exception as e:
-#                 raise ValueError(f"Failed to parse JSONL or JSON from {path}: {e}")
-#     else:
-#         try:
-#             data = json.loads(text)
-#         except Exception as e:
-#             raise ValueError(f"Failed to parse JSON from {path}: {e}")
-
-#     # extract pose
-#     pose = None
-#     if isinstance(data, dict):
-#         if 'robot_position' in data:
-#             rp = data['robot_position']
-#             pose = (float(rp[0]), float(rp[1]), float(rp[2]))
-#         elif 'pose' in data:
-#             p = data['pose']
-#             # accept [x,y,theta] or dict
-#             if isinstance(p, (list, tuple)):
-#                 pose = (float(p[0]), float(p[1]), float(p[2]))
-#             elif isinstance(p, dict):
-#                 pose = (float(p.get('x', 0.0)), float(p.get('y', 0.0)), float(p.get('theta', 0.0)))
-
-#         # landmarks / map
-#         landmarks = []
-#         if 'map' in data and isinstance(data['map'], (list, tuple)):
-#             mp = data['map']
-#             # map as list of [x,y] points
-#             for i, item in enumerate(mp):
-#                 try:
-#                     x, y = float(item[0]), float(item[1])
-#                 except Exception:
-#                     # skip malformed entries
-#                     continue
-#                 landmarks.append((i + 1, x, y))
-#         elif 'landmarks' in data:
-#             lm = data['landmarks']
-#             # accept list of dicts or list of [id,x,y] or [x,y]
-#             for i, item in enumerate(lm):
-#                 if isinstance(item, dict):
-#                     _id = item.get('id', i + 1)
-#                     x = item.get('x') if 'x' in item else (item.get('0') if '0' in item else None)
-#                     y = item.get('y') if 'y' in item else (item.get('1') if '1' in item else None)
-#                     try:
-#                         landmarks.append((int(_id), float(x), float(y)))
-#                     except Exception:
-#                         continue
-#                 elif isinstance(item, (list, tuple)):
-#                     if len(item) == 3:
-#                         landmarks.append((int(item[0]), float(item[1]), float(item[2])))
-#                     elif len(item) == 2:
-#                         landmarks.append((i + 1, float(item[0]), float(item[1])))
-#         else:
-#             landmarks = []
-
-#         # covariance (optional)
-#         cov = None
-#         if 'cov' in data:
-#             try:
-#                 arr = np.array(data['cov'], dtype=float)
-#                 if arr.shape == (2, 2):
-#                     cov = arr
-#             except Exception:
-#                 cov = None
-
-#         # fallback defaults
-#         if pose is None:
-#             # default pose at origin
-#             pose = (0.0, 0.0, 0.0)
-#         if cov is None:
-#             cov = np.array([[0.5, 0.0], [0.0, 0.3]])
-
-#         return landmarks, pose, cov
-
-#     else:
-#         raise ValueError(f"Unsupported JSON root type: {type(data)} in {path}")
-
 # --- Main -------------------------------------------------------------------
 
 def main():
@@ -452,27 +313,20 @@ def main():
     parser.add_argument('--frame', '-f', help="Which JSONL frame to use: 'first', 'last' (default) or a 0-based integer index", default='last')
     args = parser.parse_args()
 
-    if args.data:
-        # interpret --frame argument: allow 'first', 'last' or integer (0-based)
-        frame_arg = args.frame
-        try:
-            # make a new DataLoader object. Pass that to the visulizer
-            # viz reads from the dataloader and draws each frame.
-            landmarks, pose, cov = 
-        except Exception as e:
-            print("Failed to load data:", e)
-            sys.exit(1)
-    else:
-        # default demo scene
-        # rng = np.random.RandomState(0)
-        # landmarks = [(i+1, float(rng.uniform(-15, 15)), float(rng.uniform(-15, 15))) for i in range(10)]
-        # pose = (0.0, 0.0, math.radians(20))
-        # cov = np.array([[0.5, 0.0], [0.0, 0.3]])
-        pass
+    # interpret --frame argument: allow 'first', 'last' or integer (0-based)
+    frame_arg = args.frame
+    try:
+        # make a new DataLoader object. Pass that to the visulizer
+        # viz reads from the dataloader and draws each frame.
+        dl = DataLoader(args.data)
+        viz = Visualizer(dl)
+        print("Visualizer controls: space=step, r=run/pause, q=quit")
+        viz.run()
+    except Exception as e:
+        print("Failed to load data:", e)
+        sys.exit(1)
 
-    viz = Visualizer(landmarks=landmarks, robot_pose=pose, robot_cov=cov)
-    print("Visualizer controls: space=step, r=run/pause, q=quit")
-    viz.run()
+
 
 if __name__ == '__main__':
     main()
