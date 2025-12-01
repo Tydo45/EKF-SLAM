@@ -164,36 +164,311 @@ class Visualizer:
             pass
 
 # --- Data loader -------------------------------------------------------------
+class DataLoader:
+    """Simple JSONL data loader for the visualizer.
 
-def load_from_json(path):
-    with open(path, 'r') as f:
-        data = json.load(f)
-    landmarks = []
-    for lm in data.get('landmarks', []):
-        landmarks.append((lm.get('id', len(landmarks)+1), lm['x'], lm['y']))
-    pose = tuple(data.get('robot_pose', (0.0, 0.0, 0.0)))
-    cov = np.array(data.get('robot_covariance', [[0.2, 0.0], [0.0, 0.2]]))
-    return landmarks, pose, cov
+    Usage:
+      dl = DataLoader(path, start_frame=None)
+      frame = dl.read_next()           # read next frame (returns (landmarks, pose, cov))
+      frame = dl.read_frame(10)        # read frame index 10 (0-based)
+      total = dl.count_frames()
+
+    The loader is robust to plain JSON (single object) or newline-delimited
+    JSON objects (JSONL). For JSONL it treats each non-empty line as a frame.
+    """
+    def __init__(self, file_path, start_frame=None):
+        self.file_path = file_path
+        # current frame index last returned by read_next/read_frame (-1 = none yet)
+        self.current_index = -1
+        # optional starting frame if you want to begin at a particular index
+        self.start_frame = start_frame
+
+    def _parse_record(self, data):
+        """Convert a parsed JSON dict into (landmarks, pose, cov) like load_from_json."""
+        pose = None
+        landmarks = []
+        cov = None
+
+        if not isinstance(data, dict):
+            raise ValueError("Expected JSON object for frame")
+
+        if 'robot_position' in data:
+            rp = data['robot_position']
+            pose = (float(rp[0]), float(rp[1]), float(rp[2]))
+        elif 'pose' in data: # should not be the case
+            p = data['pose']
+            if isinstance(p, (list, tuple)):
+                pose = (float(p[0]), float(p[1]), float(p[2]))
+            elif isinstance(p, dict):
+                pose = (float(p.get('x', 0.0)), float(p.get('y', 0.0)), float(p.get('theta', 0.0)))
+
+        # landmarks / map
+        if 'map' in data and isinstance(data['map'], (list, tuple)):
+            mp = data['map']
+            for i, item in enumerate(mp):
+                try:
+                    x, y = float(item[0]), float(item[1])
+                except Exception:
+                    continue
+                landmarks.append((i + 1, x, y))
+        elif 'landmarks' in data: # should not be the case, we use map, not landmarks
+            lm = data['landmarks']
+            for i, item in enumerate(lm):
+                if isinstance(item, dict):
+                    _id = item.get('id', i + 1)
+                    x = item.get('x') if 'x' in item else (item.get('0') if '0' in item else None)
+                    y = item.get('y') if 'y' in item else (item.get('1') if '1' in item else None)
+                    try:
+                        landmarks.append((int(_id), float(x), float(y)))
+                    except Exception:
+                        continue
+                elif isinstance(item, (list, tuple)):
+                    if len(item) == 3:
+                        try:
+                            landmarks.append((int(item[0]), float(item[1]), float(item[2])))
+                        except Exception:
+                            continue
+                    elif len(item) == 2:
+                        try:
+                            landmarks.append((i + 1, float(item[0]), float(item[1])))
+                        except Exception:
+                            continue
+
+        # covariance - just the shape of the robot circle, TODO change this later
+        if 'cov' in data:
+            try:
+                arr = np.array(data['cov'], dtype=float)
+                if arr.shape == (2, 2):
+                    cov = arr
+            except Exception:
+                cov = None
+
+        if pose is None:
+            pose = (0.0, 0.0, 0.0)
+        if cov is None:
+            cov = np.array([[0.5, 0.0], [0.0, 0.3]])
+
+        return landmarks, pose, cov
+
+    def _iter_nonempty_lines(self):
+        """Yield (idx, line) for each non-empty line in the file."""
+        with open(self.file_path, 'r', encoding='utf-8') as f:
+            for i, ln in enumerate(f):
+                if ln.strip():
+                    yield i, ln.rstrip('\n')
+
+    def count_frames(self):
+        """Return number of non-empty JSONL frames (or 1 for plain JSON)."""
+        # count non-empty lines
+        count = 0
+        with open(self.file_path, 'r', encoding='utf-8') as f:
+            text = f.read().strip()
+            if not text:
+                return 0
+            # if file parses as a single JSON object (multi-line), treat as one frame
+            try:
+                _ = json.loads(text)
+                # if it's a dict or list and not line-delimited, count as 1
+                return 1
+            except Exception:
+                # not a single JSON object, count non-empty lines
+                for ln in text.splitlines():
+                    if ln.strip():
+                        count += 1
+        return count
+
+    def read_frame(self, index):
+        """Read a specific frame (0-based index) and return (landmarks, pose, cov).
+
+        Raises IndexError when index is out of range.
+        """
+        if index is None:
+            index = 0
+        # iterate until the requested frame
+        for i, ln in self._iter_nonempty_lines():
+            if i == index:
+                try:
+                    data = json.loads(ln)
+                except Exception:
+                    # fallback: try to parse whole file as JSON and treat as single frame
+                    with open(self.file_path, 'r', encoding='utf-8') as f:
+                        full = f.read()
+                    data = json.loads(full)
+                self.current_index = index
+                return self._parse_record(data)
+        raise IndexError(f"Frame index {index} out of range")
+
+    def read_next(self):
+        """Read the next frame sequentially and return (landmarks, pose, cov).
+
+        If called repeatedly, this will traverse frames from 0..N-1. After the
+        last frame, raises StopIteration.
+        """
+        next_index = self.current_index + 1
+        try:
+            return self.read_frame(next_index)
+        except IndexError:
+            raise StopIteration
+
+    def reset(self):
+        """Reset internal position so next read_next() returns frame 0."""
+        self.current_index = -1
+
+# def load_from_json(path, frame=None):
+#     """Load data from a JSON or JSONL file and return (landmarks, pose, cov).
+
+#     Supported input shapes (robust):
+#         - JSONL: multiple JSON objects, each with keys 'robot_position' and 'map'.
+#             By default the first non-empty line is used as the initial state (can be
+#             overridden with the --frame CLI option).
+#     - JSON: a single JSON object with keys 'robot_position' (or 'pose') and
+#       'map' or 'landmarks'.
+
+#     Returns:
+#       landmarks: list of (id, x, y)
+#       pose: (x, y, theta)
+#       cov: 2x2 numpy array (default if not present in file)
+#     """
+#     # read whole file first; support JSONL by picking the last non-empty line
+#     with open(path, 'r', encoding='utf-8') as f:
+#         text = f.read()
+
+#     text = text.strip()
+#     if not text:
+#         raise ValueError(f"Empty file: {path}")
+
+#     data = None
+#     # detect JSONL (multiple lines / multiple top-level JSON objects)
+#     if '\n' in text:
+#         # collect non-empty JSON lines
+#         lines = [ln for ln in text.splitlines() if ln.strip()]
+#         if not lines:
+#             raise ValueError(f"No JSON objects found in {path}")
+
+#         # decide which frame to use
+#         chosen = None
+#         # default behaviour: treat None as 'first'
+#         if frame is None or str(frame).lower() == 'first':
+#             chosen = lines[0]
+#         elif str(frame).lower() == 'last':
+#             chosen = lines[-1]
+#         else:
+#             # try integer index (0-based)
+#             try:
+#                 idx = int(frame)
+#             except Exception:
+#                 raise ValueError("--frame must be 'first', 'last' or an integer index (0-based)")
+#             if idx < 0 or idx >= len(lines):
+#                 raise IndexError(f"Frame index {idx} out of range (0..{len(lines)-1})")
+#             chosen = lines[idx]
+
+#         try:
+#             data = json.loads(chosen)
+#         except Exception:
+#             # fallback: try to parse entire file as JSON array/object
+#             try:
+#                 data = json.loads(text)
+#             except Exception as e:
+#                 raise ValueError(f"Failed to parse JSONL or JSON from {path}: {e}")
+#     else:
+#         try:
+#             data = json.loads(text)
+#         except Exception as e:
+#             raise ValueError(f"Failed to parse JSON from {path}: {e}")
+
+#     # extract pose
+#     pose = None
+#     if isinstance(data, dict):
+#         if 'robot_position' in data:
+#             rp = data['robot_position']
+#             pose = (float(rp[0]), float(rp[1]), float(rp[2]))
+#         elif 'pose' in data:
+#             p = data['pose']
+#             # accept [x,y,theta] or dict
+#             if isinstance(p, (list, tuple)):
+#                 pose = (float(p[0]), float(p[1]), float(p[2]))
+#             elif isinstance(p, dict):
+#                 pose = (float(p.get('x', 0.0)), float(p.get('y', 0.0)), float(p.get('theta', 0.0)))
+
+#         # landmarks / map
+#         landmarks = []
+#         if 'map' in data and isinstance(data['map'], (list, tuple)):
+#             mp = data['map']
+#             # map as list of [x,y] points
+#             for i, item in enumerate(mp):
+#                 try:
+#                     x, y = float(item[0]), float(item[1])
+#                 except Exception:
+#                     # skip malformed entries
+#                     continue
+#                 landmarks.append((i + 1, x, y))
+#         elif 'landmarks' in data:
+#             lm = data['landmarks']
+#             # accept list of dicts or list of [id,x,y] or [x,y]
+#             for i, item in enumerate(lm):
+#                 if isinstance(item, dict):
+#                     _id = item.get('id', i + 1)
+#                     x = item.get('x') if 'x' in item else (item.get('0') if '0' in item else None)
+#                     y = item.get('y') if 'y' in item else (item.get('1') if '1' in item else None)
+#                     try:
+#                         landmarks.append((int(_id), float(x), float(y)))
+#                     except Exception:
+#                         continue
+#                 elif isinstance(item, (list, tuple)):
+#                     if len(item) == 3:
+#                         landmarks.append((int(item[0]), float(item[1]), float(item[2])))
+#                     elif len(item) == 2:
+#                         landmarks.append((i + 1, float(item[0]), float(item[1])))
+#         else:
+#             landmarks = []
+
+#         # covariance (optional)
+#         cov = None
+#         if 'cov' in data:
+#             try:
+#                 arr = np.array(data['cov'], dtype=float)
+#                 if arr.shape == (2, 2):
+#                     cov = arr
+#             except Exception:
+#                 cov = None
+
+#         # fallback defaults
+#         if pose is None:
+#             # default pose at origin
+#             pose = (0.0, 0.0, 0.0)
+#         if cov is None:
+#             cov = np.array([[0.5, 0.0], [0.0, 0.3]])
+
+#         return landmarks, pose, cov
+
+#     else:
+#         raise ValueError(f"Unsupported JSON root type: {type(data)} in {path}")
 
 # --- Main -------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description='Simple EKF-SLAM Visualizer')
     parser.add_argument('--data', '-d', help='JSON file with initial landmarks/pose', default=None)
+    parser.add_argument('--frame', '-f', help="Which JSONL frame to use: 'first', 'last' (default) or a 0-based integer index", default='last')
     args = parser.parse_args()
 
     if args.data:
+        # interpret --frame argument: allow 'first', 'last' or integer (0-based)
+        frame_arg = args.frame
         try:
-            landmarks, pose, cov = load_from_json(args.data)
+            # make a new DataLoader object. Pass that to the visulizer
+            # viz reads from the dataloader and draws each frame.
+            landmarks, pose, cov = 
         except Exception as e:
             print("Failed to load data:", e)
             sys.exit(1)
     else:
         # default demo scene
-        rng = np.random.RandomState(0)
-        landmarks = [(i+1, float(rng.uniform(-15, 15)), float(rng.uniform(-15, 15))) for i in range(10)]
-        pose = (0.0, 0.0, math.radians(20))
-        cov = np.array([[0.5, 0.0], [0.0, 0.3]])
+        # rng = np.random.RandomState(0)
+        # landmarks = [(i+1, float(rng.uniform(-15, 15)), float(rng.uniform(-15, 15))) for i in range(10)]
+        # pose = (0.0, 0.0, math.radians(20))
+        # cov = np.array([[0.5, 0.0], [0.0, 0.3]])
+        pass
 
     viz = Visualizer(landmarks=landmarks, robot_pose=pose, robot_cov=cov)
     print("Visualizer controls: space=step, r=run/pause, q=quit")
