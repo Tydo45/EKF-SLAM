@@ -21,6 +21,12 @@ This is a self-contained starter visualizer for integration into an EKF-SLAM pro
 
 import matplotlib.pyplot as plt
 
+ROBOT_COV = np.array([[0.02, 0.0], [0.0, 0.02]])
+# for the arrow
+HEAD_WIDTH=0.1
+HEAD_LENGTH=0.1
+ARROW_LENGTH=0.3
+
 # --- Utilities ---------------------------------------------------------------
 
 def cov_ellipse_params(cov, n_std=2.0):
@@ -46,7 +52,7 @@ class Visualizer:
         except StopIteration:
             self.landmarks = []
             self.pose = (0.0, 0.0, 0.0)
-            self.cov = np.array([[0.2, 0.0], [0.0, 0.2]])
+            self.cov = ROBOT_COV
 
         # matplotlib setup
         self.fig, self.ax = plt.subplots(figsize=(7, 7))
@@ -102,9 +108,9 @@ class Visualizer:
             self.cov_ellipse.remove()
             self.cov_ellipse = None
         # arrow indicating heading
-        dx = math.cos(theta) * 1.0
-        dy = math.sin(theta) * 1.0
-        self.robot_arrow = self.ax.arrow(x, y, dx, dy, head_width=0.4, head_length=0.6,
+        dx = math.cos(theta) * ARROW_LENGTH
+        dy = math.sin(theta) * ARROW_LENGTH
+        self.robot_arrow = self.ax.arrow(x, y, dx, dy, head_width=HEAD_WIDTH, head_length=HEAD_LENGTH,
                                          fc='tab:blue', ec='tab:blue', zorder=3)
         # covariance ellipse (use xy submatrix)
         width, height, angle = cov_ellipse_params(self.cov)
@@ -237,7 +243,7 @@ class DataLoader:
         if pose is None:
             pose = (0.0, 0.0, 0.0)
         if cov is None:
-            cov = np.array([[0.5, 0.0], [0.0, 0.3]])
+            cov = ROBOT_COV
 
         return landmarks, pose, cov
 
