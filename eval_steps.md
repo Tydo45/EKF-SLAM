@@ -8,3 +8,8 @@ points far away are close to 0
 Of course it should be an equation that approaches 0 but never crosses it  
 
 3. Develop a way to provide a value to a distance from a point
+
+# value from a point
+Use:  
+y=1/((x*0.01/b)+0.01)  
+b is how far away a point can be to reach at least 50% accuracy
