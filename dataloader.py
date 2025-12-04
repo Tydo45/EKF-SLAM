@@ -110,10 +110,22 @@ class DataLoader:
     def read_frame(self, index):
         """Read a specific frame (0-based index) and return (landmarks, pose).
 
-        Raises IndexError when index is out of range.
+        Raises IndexError when index is out of range. Passing index == -1
+        returns the last frame.
         """
         if index is None:
             index = 0
+
+        # support -1 as "last frame"
+        if index == -1:
+            total = self.count_frames()
+            if total == 0:
+                raise IndexError("Frame index -1 out of range (no frames)")
+            index = total - 1
+
+        if index < 0:
+            raise IndexError(f"Frame index {index} out of range")
+
         # iterate until the requested frame
         for i, ln in self._iter_nonempty_lines():
             if i == index:
