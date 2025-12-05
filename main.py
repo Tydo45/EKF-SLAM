@@ -51,6 +51,7 @@ class Visualizer:
         # read initial frame
         try:
             self.landmarks, self.pose = self.data_loader.read_next()
+            self.true_landmarks, _ = self.data_loader.read_frame(0)
             # DataLoader no longer returns covariance; use visualizer default
             self.cov = ROBOT_COV
         except StopIteration:
@@ -70,8 +71,10 @@ class Visualizer:
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
 
     def _init_draw(self):
+        self.true_landmark_sc = self.ax.scatter([], [], c='red', s=50, zorder=2)
         self.landmark_sc = self.ax.scatter([], [], c='tab:green', s=50, zorder=2)
         self.landmark_texts = []
+        self.true_landmark_texts = []
         self.robot_arrow = None
         self.cov_ellipse = None
         self._update_plot_limits()
@@ -101,6 +104,20 @@ class Visualizer:
                 txt = self.ax.text(x, y, f'{_id}', color='k', fontsize=9,
                                    verticalalignment='bottom', horizontalalignment='right')
                 self.landmark_texts.append(txt)
+    
+    def _draw_true_landmarks(self):
+        if self.true_landmark_texts:
+            for t in self.true_landmark_texts:
+                t.remove()
+            self.true_landmark_texts = []
+        if self.true_landmarks:
+            xs = [x for (_id, x, y) in self.true_landmarks]
+            ys = [y for (_id, x, y) in self.true_landmarks]
+            self.true_landmark_sc.set_offsets(np.column_stack((xs, ys)))
+            # for (_id, x, y) in self.true_landmarks:
+            #     txt = self.ax.text(x, y, f'{_id}', color='k', fontsize=9,
+            #                        verticalalignment='bottom', horizontalalignment='right')
+            #     self.true_landmark_texts.append(txt)
 
     def _draw_robot(self):
         x, y, theta = self.pose
@@ -125,6 +142,7 @@ class Visualizer:
     def update(self):
         """Redraw everything (call after updating self.pose/self.landmarks/self.cov)."""
         self._update_plot_limits()
+        self._draw_true_landmarks()
         self._draw_landmarks()
         self._draw_robot()
         self.fig.canvas.draw_idle()
@@ -136,6 +154,8 @@ class Visualizer:
         Note: DataLoader does not return covariance; the visualizer keeps its
         own robot covariance (`ROBOT_COV`)."""
         try:
+            if (self.data_loader.current_index == 0):
+                self.data_loader.current_index = 1
             self.landmarks, self.pose = self.data_loader.read_next()
             self.cov = ROBOT_COV
         except StopIteration:
@@ -186,7 +206,8 @@ def main():
         dl = DataLoader(args.data)
         viz = Visualizer(dl)
         landmarks, _ = dl.read_frame(-1)
-        metrics = Metrics(landmarks, [[0,2],[0,-2],[2,0],[-2,0],[2,2],[-2,-2],[2,-2],[-2,2]])
+        true_landmarks, _ = dl.read_frame(0)
+        metrics = Metrics(landmarks, true_landmarks)
         score = metrics.score()
         print("Score:", score)
         print("Visualizer controls: space=step, r=run/pause, q=quit")

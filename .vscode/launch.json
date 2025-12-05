@@ -13,7 +13,7 @@
             "console": "integratedTerminal",
             "args": [
                 "-d",
-                "${workspaceFolder}/model_runs/slam_history.jsonl"
+                "${workspaceFolder}/model_runs/slam_history_3.jsonl"
             ]
         }
     ]
