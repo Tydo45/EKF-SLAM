@@ -1,6 +1,6 @@
 import math
 
-DIST_FOR_HALF = 5
+DIST_FOR_HALF = 20
 
 class Metrics:
     """Class to compute and store metrics for SLAM evaluation.
