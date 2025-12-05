@@ -5,6 +5,7 @@ import json
 import numpy as np
 from matplotlib.patches import Ellipse
 from dataloader import DataLoader
+from metrics import Metrics
 
 #!/usr/bin/env python3
 """
@@ -184,6 +185,10 @@ def main():
         # viz reads from the dataloader and draws each frame.
         dl = DataLoader(args.data)
         viz = Visualizer(dl)
+        landmarks, _ = dl.read_frame(-1)
+        metrics = Metrics(landmarks, [[0,2],[0,-2],[2,0],[-2,0],[2,2],[-2,-2],[2,-2],[-2,2]])
+        score = metrics.score()
+        print("Score:", score)
         print("Visualizer controls: space=step, r=run/pause, q=quit")
         viz.run()
     except Exception as e:

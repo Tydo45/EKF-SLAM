@@ -12,7 +12,7 @@ class Metrics:
         landmark_pos_true: list of (x, y) tuples for true landmarks
         total_score: cumulative score over all landmarks
     """
-    def __init__(self, landmark_pos_true, landmark_pos_found):
+    def __init__(self, landmark_pos_found, landmark_pos_true):
         self.landmark_pos_found = landmark_pos_found
         self.landmark_pos_true = landmark_pos_true
         self.total_score = 0.0
@@ -54,11 +54,31 @@ class Metrics:
         if not self.landmark_pos_found or not self.landmark_pos_true:
             return
 
-        for i, (fx, fy) in enumerate(self.landmark_pos_found):
+        for i, found in enumerate(self.landmark_pos_found):
+            # expect found to be [x,y]
+            try:
+                if isinstance(found, (list, tuple)) and len(found) == 3:
+                    fx, fy = float(found[0]), float(found[1])
+                else:
+                    # unsupported format; skip
+                    continue
+            except Exception:
+                continue
+
             # compute distances to all true landmarks and pick the nearest
             min_dist = float('inf')
             min_j = None
-            for j, (tx, ty) in enumerate(self.landmark_pos_true):
+            for j, true in enumerate(self.landmark_pos_true):
+                try:
+                    if isinstance(true, (list, tuple)) and len(true) == 2:
+                        tx, ty = float(true[0]), float(true[1])
+                    elif isinstance(true, (list, tuple)) and len(true) == 3:
+                        tx, ty = float(true[1]), float(true[2])
+                    else:
+                        continue
+                except Exception:
+                    continue
+
                 d = math.hypot(fx - tx, fy - ty)
                 if d < min_dist:
                     min_dist = d
