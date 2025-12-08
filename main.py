@@ -27,6 +27,9 @@ ROBOT_COV = np.array([[0.02, 0.0], [0.0, 0.02]])
 HEAD_WIDTH=0.1
 HEAD_LENGTH=0.1
 ARROW_LENGTH=0.3
+PLOT_BOUND_PADDING=2
+PLOT_STARTING_SIZE =5
+
 
 # --- Utilities ---------------------------------------------------------------
 
@@ -47,6 +50,8 @@ class Visualizer:
     def __init__(self, DataLoader):
         # reader for JSONL data
         self.data_loader = DataLoader
+        self.plot_xmin, self.plot_xmax = -PLOT_STARTING_SIZE, PLOT_STARTING_SIZE
+        self.plot_ymin, self.plot_ymax = -PLOT_STARTING_SIZE, PLOT_STARTING_SIZE
         # read initial frame
         try:
             self.data_loader.read_next() # don't want to grab the first line which has the true landmark positions
@@ -83,14 +88,22 @@ class Visualizer:
         # adjust limits based on landmarks and robot
         xs = [x for (_id, x, y) in self.landmarks] + [self.pose[0]]
         ys = [y for (_id, x, y) in self.landmarks] + [self.pose[1]]
-        if xs and ys:
-            xmin, xmax = min(xs) - 5, max(xs) + 5
-            ymin, ymax = min(ys) - 5, max(ys) + 5
-        else:
-            xmin, xmax, ymin, ymax = -10, 10, -10, 10
-        self.ax.set_xlim(xmin, xmax)
-        self.ax.set_ylim(ymin, ymax)
-
+        if (xs and ys):
+            # adjust dynamically
+            # plot_xmin, plot_xmax = min(xs), max(xs) + 5
+            # plot_ymin, plot_ymax = min(ys) - 5, max(ys) + 5
+            xmin, xmax = min(xs), max(xs)
+            ymin, ymax = min(ys), max(ys)
+            if (xmin < self.plot_xmin):
+                self.plot_xmin = xmin - PLOT_BOUND_PADDING
+            if (xmax > self.plot_xmax):
+                self.plot_xmax = xmax + PLOT_BOUND_PADDING
+            if (ymin < self.plot_ymin):
+                self.plot_ymin = ymin - PLOT_BOUND_PADDING
+            if (ymax > self.plot_ymax):
+                self.plot_ymax = ymax + PLOT_BOUND_PADDING
+        self.ax.set_xlim(self.plot_xmin, self.plot_xmax)
+        self.ax.set_ylim(self.plot_ymin, self.plot_ymax)
     def _draw_landmarks(self):
         if self.landmark_texts:
             for t in self.landmark_texts:
