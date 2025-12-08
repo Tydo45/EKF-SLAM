@@ -5,7 +5,6 @@ import json
 import numpy as np
 from matplotlib.patches import Ellipse
 from dataloader import DataLoader
-from metrics import Metrics
 
 #!/usr/bin/env python3
 """
@@ -50,6 +49,7 @@ class Visualizer:
         self.data_loader = DataLoader
         # read initial frame
         try:
+            self.data_loader.read_next() # don't want to grab the first line which has the true landmark positions
             self.landmarks, self.pose = self.data_loader.read_next()
             self.true_landmarks, _ = self.data_loader.read_frame(0)
             # DataLoader no longer returns covariance; use visualizer default
@@ -205,11 +205,8 @@ def main():
         # viz reads from the dataloader and draws each frame.
         dl = DataLoader(args.data)
         viz = Visualizer(dl)
-        landmarks, _ = dl.read_frame(-1)
-        true_landmarks, _ = dl.read_frame(0)
-        metrics = Metrics(landmarks, true_landmarks)
-        score = metrics.score()
-        print("Score:", score)
+        # landmarks, _ = dl.read_frame(-1)
+        # true_landmarks, _ = dl.read_frame(0)
         print("Visualizer controls: space=step, r=run/pause, q=quit")
         viz.run()
     except Exception as e:
