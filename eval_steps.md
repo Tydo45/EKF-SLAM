@@ -1,5 +1,5 @@
-1. Each point should look at all the points it's near and choose it's nearest neighbor
-2. calculate how far it is from the actual point  
+1. Each point should look at all the true points it's near and choose it's nearest neighbor
+2. calculate how far it is from the true point  
 
 There needs to be either an accepted radius for if a point is close enough to be true... or there needs to be some sort of an equation based on how close the point is to the actual.  
 For example we could use y=-x+100, and x = distance from closest point  
