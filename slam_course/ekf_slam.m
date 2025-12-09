@@ -296,8 +296,7 @@ for t = 1:200
     % II.1 SIMULATOR
     % a. motion
     n = q .* randn(2,1); % perturbation vector
-    R = move(R, U, zeros(2,1) ); % we will perturb the estimator
-    % instead of the simulator
+    R = move(R, U, zeros(2,1) ); % we will perturb the estimator instead of the simulator
     % b. observations
     for i = 1:N % i: landmark index
         v = s .* randn(2,1); % measurement noise
